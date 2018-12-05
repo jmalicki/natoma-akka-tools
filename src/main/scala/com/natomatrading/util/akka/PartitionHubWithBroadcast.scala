@@ -1,8 +1,13 @@
+/**
+  * Copyright (C) 2015-2018 Lightbend Inc. <https://www.lightbend.com>
+  * Copyright (C) 2018 Joseph Malicki
+  */
+
 package com.natomatrading.util.akka
 
 import java.util
 import java.util.concurrent.ConcurrentHashMap
-import java.util.concurrent.atomic.{AtomicInteger, AtomicLong, AtomicReference, AtomicReferenceArray}
+import java.util.concurrent.atomic.{AtomicInteger, AtomicLong, AtomicReference}
 
 import akka.NotUsed
 import akka.annotation.{ApiMayChange, DoNotInherit, InternalApi}
@@ -93,8 +98,9 @@ object PartitionHubWithBroadcast {
     * @param partitioner Function that decides where to route an element. The function takes two parameters;
     *   the first is the number of active consumers and the second is the stream element. The function should
     *   return the index of the selected consumer for the given element, i.e. int greater than or equal to 0
-    *   and less than number of consumers. E.g. `(size, elem) => math.abs(elem.hashCode % size)`. It's also
-    *   possible to use `-1` to drop the element.
+    *   and less than number of consumers. E.g. `(size, elem) => math.abs(elem.hashCode % size)`.  If the
+    *   partitioner returns -1, the element is broadcast to all partitions.  It's also possible to use `-2` to
+    *   drop the element.
     * @param startAfterNrOfConsumers Elements are buffered until this number of consumers have been connected.
     *   This is only used initially when the operator is starting up, i.e. it is not honored when consumers have
     *   been removed (canceled).
@@ -106,7 +112,8 @@ object PartitionHubWithBroadcast {
               bufferSize: Int = defaultBufferSize): Sink[T, Source[T, NotUsed]] = {
     val fun: (ConsumerInfo, T) ⇒ Long = { (info, elem) ⇒
       val idx = partitioner(info.size, elem)
-      if (idx < 0) -1L
+      if (idx < -1) -2L
+      else if (idx == -1) -1L
       else info.consumerIdByIdx(idx)
     }
     statefulSink(() ⇒ fun, startAfterNrOfConsumers, bufferSize)
@@ -167,11 +174,6 @@ object PartitionHubWithBroadcast {
     final case class Open(callbackFuture: Future[AsyncCallback[HubEvent]], registrations: List[Consumer]) extends HubState
     final case class Closed(failure: Option[Throwable]) extends HubState
 
-    // The reason for the two implementations here is that the common case (as I see it) is to have a few (< 100)
-    // consumers over the lifetime of the hub but we must of course also support more.
-    // FixedQueues is more efficient than ConcurrentHashMap so we use that for the first 128 consumers.
-    private val FixedQueues = 128
-
     // Need the queue to be pluggable to be able to use a more performant (less general)
     // queue in Artery
     trait PartitionQueue {
@@ -202,23 +204,18 @@ object PartitionHubWithBroadcast {
     }
 
     class PartitionQueueImpl extends PartitionQueue {
-      private val queues1 = new AtomicReferenceArray[ConsumerQueue](FixedQueues)
-      private val queues2 = new ConcurrentHashMap[Long, ConsumerQueue]
+      private val queues = new ConcurrentHashMap[Long, ConsumerQueue]
       private val _totalSize = new AtomicInteger
 
       override def init(id: Long): Unit = {
-        if (id < FixedQueues)
-          queues1.set(id.toInt, ConsumerQueue.empty)
-        else
-          queues2.put(id, ConsumerQueue.empty)
+        queues.put(id, ConsumerQueue.empty)
       }
 
       override def totalSize: Int = _totalSize.get
 
       def size(id: Long): Int = {
         val queue =
-          if (id < FixedQueues) queues1.get(id.toInt)
-          else queues2.get(id)
+          queues.get(id)
         if (queue eq null)
           throw new IllegalArgumentException(s"Invalid stream identifier: $id")
         queue.size
@@ -226,8 +223,7 @@ object PartitionHubWithBroadcast {
 
       override def isEmpty(id: Long): Boolean = {
         val queue =
-          if (id < FixedQueues) queues1.get(id.toInt)
-          else queues2.get(id)
+          queues.get(id)
         if (queue eq null)
           throw new IllegalArgumentException(s"Invalid stream identifier: $id")
         queue.isEmpty
@@ -236,67 +232,42 @@ object PartitionHubWithBroadcast {
       override def nonEmpty(id: Long): Boolean = !isEmpty(id)
 
       override def offer(id: Long, elem: Any): Unit = {
-        @tailrec def offer1(): Unit = {
-          val i = id.toInt
-          val queue = queues1.get(i)
-          if (queue eq null)
-            throw new IllegalArgumentException(s"Invalid stream identifier: $id")
-          if (queues1.compareAndSet(i, queue, queue.enqueue(elem)))
-            _totalSize.incrementAndGet()
-          else
-            offer1() // CAS failed, retry
-        }
 
-        @tailrec def offer2(): Unit = {
-          val queue = queues2.get(id)
+        @tailrec def _offer(): Unit = {
+          val queue = queues.get(id)
           if (queue eq null)
             throw new IllegalArgumentException(s"Invalid stream identifier: $id")
-          if (queues2.replace(id, queue, queue.enqueue(elem))) {
+          if (queues.replace(id, queue, queue.enqueue(elem))) {
             _totalSize.incrementAndGet()
           } else
-            offer2() // CAS failed, retry
+            _offer() // CAS failed, retry
         }
 
-        def publish(): Unit = {
-          for (id <- 0 until FixedQueues) {
-            if (queues2.contains(id))
-              offer(id, elem)
-          }
-          for (id <- queues2.keySet.asScala)
+        def _broadcast(): Unit = {
+          for (id <- queues.keySet.asScala)
             offer(id, elem)
         }
 
-        if (id < 0) publish() else if (id < FixedQueues) offer1() else offer2()
+        if (id < 0) _broadcast() else _offer()
       }
 
       override def poll(id: Long): AnyRef = {
-        @tailrec def poll1(): AnyRef = {
-          val i = id.toInt
-          val queue = queues1.get(i)
+
+        @tailrec def _poll(): AnyRef = {
+          val queue = queues.get(id)
           if ((queue eq null) || queue.isEmpty) null
-          else if (queues1.compareAndSet(i, queue, queue.tail)) {
+          else if (queues.replace(id, queue, queue.tail)) {
             _totalSize.decrementAndGet()
             queue.head.asInstanceOf[AnyRef]
           } else
-            poll1() // CAS failed, try again
+            _poll() // CAS failed, try again
         }
 
-        @tailrec def poll2(): AnyRef = {
-          val queue = queues2.get(id)
-          if ((queue eq null) || queue.isEmpty) null
-          else if (queues2.replace(id, queue, queue.tail)) {
-            _totalSize.decrementAndGet()
-            queue.head.asInstanceOf[AnyRef]
-          } else
-            poll2() // CAS failed, try again
-        }
-
-        if (id < FixedQueues) poll1() else poll2()
+        _poll()
       }
 
       override def remove(id: Long): Unit = {
-        (if (id < FixedQueues) queues1.getAndSet(id.toInt, null)
-        else queues2.remove(id)) match {
+        queues.remove(id) match {
           case null  ⇒
           case queue ⇒ _totalSize.addAndGet(-queue.size)
         }
@@ -386,9 +357,12 @@ object PartitionHubWithBroadcast {
         pending :+= elem
       } else {
         val id = materializedPartitioner(consumerInfo, elem)
-        if (id >= 0) { // negative id is a way to drop the element
+        if (id >= -1) { // negative and not -1 is a way to drop the element
           queue.offer(id, elem)
-          wakeup(id)
+          if (id >= 0)
+            wakeup(id)
+          else
+            wakeupAll()
         }
       }
     }
@@ -400,6 +374,10 @@ object PartitionHubWithBroadcast {
           needWakeup -= id
           consumer.callback.invoke(Wakeup)
       }
+    }
+
+    private def wakeupAll(): Unit = {
+      for (id <- needWakeup.keysIterator) wakeup(id)
     }
 
     override def onUpstreamFinish(): Unit = {
@@ -501,8 +479,8 @@ object PartitionHubWithBroadcast {
     def poll(id: Long, hubCallback: AsyncCallback[HubEvent]): AnyRef = {
       // try pull via async callback when half full
       // this is racy with other threads doing poll but doesn't matter
-      if (queue.totalSize == DemandThreshold)
-        hubCallback.invoke(TryPull)
+      //if (queue.totalSize == DemandThreshold)
+      hubCallback.invoke(TryPull)
 
       queue.poll(id)
     }

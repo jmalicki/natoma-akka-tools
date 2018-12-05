@@ -27,4 +27,10 @@ libraryDependencies ++= Seq(
 )
 
 logBuffered in Test := false
-scalacOptions ++= Seq("-unchecked", "-deprecation", "-feature")
+scalacOptions ++= Seq(
+  "-unchecked",
+  "-deprecation",
+  "-feature",
+  "-opt:l:inline",
+  "-opt-inline-from:**",
+)
