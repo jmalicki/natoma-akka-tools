@@ -36,10 +36,13 @@ class PartitionHubWithBroadcastSpec extends FlatSpec with Matchers with ScalaFut
 
   it should "work in the happy case with two streams" in assertAllStagesStopped {
     val source = Source(0 until 10).runWith(PartitionHubWithBroadcast.sink((size, elem) ⇒ elem % size, startAfterNrOfConsumers = 2, bufferSize = 8))
-    val result1 = source.runWith(Sink.seq)
-    // it should not start publishing until startAfterNrOfConsumers = 2
-    Thread.sleep(20)
-    val result2 = source.runWith(Sink.seq)
+    val (future1, result1) = source.toMat(Sink.seq)(Keep.both).run()
+
+    // Ensure that this future goes first
+    Await.ready(future1, 20.millis)
+
+    val (future2, result2) = source.toMat(Sink.seq)(Keep.both).run()
+
     result1.futureValue should ===(0 to 8 by 2)
     result2.futureValue should ===(1 to 9 by 2)
   }
@@ -224,7 +227,7 @@ class PartitionHubWithBroadcastSpec extends FlatSpec with Matchers with ScalaFut
     val source = Source.empty[Int].runWith(PartitionHubWithBroadcast.sink((size, elem) ⇒ elem % size, startAfterNrOfConsumers = 0))
     // Wait enough so the Hub gets the completion. This is racy, but this is fine because both
     // cases should work in the end
-    Thread.sleep(10)
+    //Thread.sleep(10)
 
     source.runWith(Sink.seq).futureValue should ===(Nil)
   }
@@ -253,7 +256,7 @@ class PartitionHubWithBroadcastSpec extends FlatSpec with Matchers with ScalaFut
       PartitionHubWithBroadcast.sink((size, elem) ⇒ 0, startAfterNrOfConsumers = 0))
     // Wait enough so the Hub gets the failure. This is racy, but this is fine because both
     // cases should work in the end
-    Thread.sleep(10)
+    //Thread.sleep(10)
 
     a[TE] shouldBe thrownBy {
       Await.result(source.runWith(Sink.seq), 3.seconds)
@@ -323,11 +326,12 @@ class PartitionHubWithBroadcastSpec extends FlatSpec with Matchers with ScalaFut
       .throttle(1, 10.millis, 3, ThrottleMode.shaping)
       .toMat(PartitionHubWithBroadcast.sink((size, elem) => -1, startAfterNrOfConsumers = 1, bufferSize = 8))(Keep.both).run()
 
-    val f1 = source.runWith(Sink.seq)
-    val f2 = source.runWith(Sink.seq)
+    val (future1, f1) = source.toMat(Sink.seq)(Keep.both).run()
+    val (future2, f2) = source.toMat(Sink.seq)(Keep.both).run()
 
-    // Ensure subscription of Sinks. This is racy but there is no event we can hook into here.
-    Thread.sleep(100)
+    Await.ready(future1, 10.millis)
+    Await.ready(future2, 10.millis)
+
     firstElem.success(Some(1))
     f1.futureValue should ===(1 to 10)
     f2.futureValue should ===(1 to 10)

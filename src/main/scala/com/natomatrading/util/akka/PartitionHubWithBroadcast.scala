@@ -9,7 +9,6 @@ import java.util
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.{AtomicInteger, AtomicLong, AtomicReference}
 
-import akka.NotUsed
 import akka.annotation.{ApiMayChange, DoNotInherit, InternalApi}
 import akka.stream._
 import akka.stream.scaladsl.{Sink, Source}
@@ -74,7 +73,7 @@ object PartitionHubWithBroadcast {
     *   is backpressured.
     */
   @ApiMayChange def statefulSink[T](partitioner: () ⇒ (ConsumerInfo, T) ⇒ Long, startAfterNrOfConsumers: Int,
-                                    bufferSize: Int = defaultBufferSize): Sink[T, Source[T, NotUsed]] =
+                                    bufferSize: Int = defaultBufferSize): Sink[T, Source[T, Future[Long]]] =
     Sink.fromGraph(new PartitionHubWithBroadcast[T](partitioner, startAfterNrOfConsumers, bufferSize))
 
   /**
@@ -109,7 +108,7 @@ object PartitionHubWithBroadcast {
     */
   @ApiMayChange
   def sink[T](partitioner: (Int, T) ⇒ Int, startAfterNrOfConsumers: Int,
-              bufferSize: Int = defaultBufferSize): Sink[T, Source[T, NotUsed]] = {
+              bufferSize: Int = defaultBufferSize): Sink[T, Source[T, Future[Long]]] = {
     val fun: (ConsumerInfo, T) ⇒ Long = { (info, elem) ⇒
       val idx = partitioner(info.size, elem)
       if (idx < -1) -2L
@@ -283,7 +282,7 @@ object PartitionHubWithBroadcast {
 @InternalApi private[akka] class PartitionHubWithBroadcast[T](
                                                   partitioner:             () ⇒ (PartitionHubWithBroadcast.ConsumerInfo, T) ⇒ Long,
                                                   startAfterNrOfConsumers: Int, bufferSize: Int)
-  extends GraphStageWithMaterializedValue[SinkShape[T], Source[T, NotUsed]] {
+  extends GraphStageWithMaterializedValue[SinkShape[T], Source[T, Future[Long]]] {
   import PartitionHubWithBroadcast.Internal._
   import PartitionHubWithBroadcast.ConsumerInfo
 
@@ -488,22 +487,25 @@ object PartitionHubWithBroadcast {
     setHandler(in, this)
   }
 
-  override def createLogicAndMaterializedValue(inheritedAttributes: Attributes): (GraphStageLogic, Source[T, NotUsed]) = {
+  override def createLogicAndMaterializedValue(inheritedAttributes: Attributes): (GraphStageLogic, Source[T, Future[Long]]) = {
     val idCounter = new AtomicLong
 
     val logic = new PartitionSinkLogic(shape)
 
-    val source = new GraphStage[SourceShape[T]] {
+
+    val source = new GraphStageWithMaterializedValue[SourceShape[T], Future[Long]] {
       val out: Outlet[T] = Outlet("PartitionHubWithBroadcast.out")
       override val shape: SourceShape[T] = SourceShape(out)
 
-      override def createLogic(inheritedAttributes: Attributes): GraphStageLogic = new GraphStageLogic(shape) with OutHandler {
+      private class PartitionSourceLogic(_shape: Shape) extends GraphStageLogic(_shape) with OutHandler {
         private val id = idCounter.getAndIncrement()
         private var hubCallback: AsyncCallback[HubEvent] = _
         private val callback = getAsyncCallback(onCommand)
         private val consumer = Consumer(id, callback)
 
         private var callbackCount = 0L
+
+        val promise = Promise[Long]
 
         override def preStart(): Unit = {
           val onHubReady: Try[AsyncCallback[HubEvent]] ⇒ Unit = {
@@ -559,11 +561,20 @@ object PartitionHubWithBroadcast {
             case Wakeup ⇒
               if (isAvailable(out)) onPull()
             case Initialize ⇒
-              if (isAvailable(out) && (hubCallback ne null)) onPull()
+              if (isAvailable(out) && (hubCallback ne null)) {
+                promise.success(id)
+                onPull()
+              } else promise.failure(new Exception("Failed before initialization"))
           }
         }
 
         setHandler(out, this)
+      }
+
+      override def createLogicAndMaterializedValue(inheritedAttributes: Attributes): (GraphStageLogic, Future[Long]) = {
+        val logic = new PartitionSourceLogic(shape)
+
+        (logic, logic.promise.future)
       }
     }
 
