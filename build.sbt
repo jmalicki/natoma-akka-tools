@@ -11,7 +11,6 @@ val akkaVersion = "2.5.18"
 libraryDependencies ++= Seq(
   "com.typesafe.akka" %% "akka-actor" % akkaVersion,
   "com.typesafe.akka" %% "akka-stream" % akkaVersion,
-  "com.github.nscala-time" %% "nscala-time" % "2.20.0",
 )
 
 // Find errors in scalatest
