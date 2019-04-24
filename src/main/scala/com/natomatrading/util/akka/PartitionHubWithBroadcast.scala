@@ -507,6 +507,12 @@ object PartitionHubWithBroadcast {
 
         val promise = Promise[Long]
 
+        private def doFailStage(ex: Throwable) = {
+          if (!promise.isCompleted)
+            promise.failure(ex)
+          failStage(ex)
+        }
+
         override def preStart(): Unit = {
           val onHubReady: Try[AsyncCallback[HubEvent]] ⇒ Unit = {
             case Success(callback) ⇒
@@ -514,12 +520,12 @@ object PartitionHubWithBroadcast {
               callback.invoke(RegistrationPending)
               if (isAvailable(out)) onPull()
             case Failure(ex) ⇒
-              failStage(ex)
+              doFailStage(ex)
           }
 
           @tailrec def register(): Unit = {
             logic.state.get() match {
-              case Closed(Some(ex)) ⇒ failStage(ex)
+              case Closed(Some(ex)) ⇒ doFailStage(ex)
               case Closed(None)     ⇒ completeStage()
               case previousState @ Open(callbackFuture, registrations) ⇒
                 val newRegistrations = consumer :: registrations
@@ -556,15 +562,21 @@ object PartitionHubWithBroadcast {
         private def onCommand(cmd: ConsumerEvent): Unit = {
           callbackCount += 1
           cmd match {
-            case HubCompleted(Some(ex)) ⇒ failStage(ex)
-            case HubCompleted(None)     ⇒ completeStage()
+            case HubCompleted(Some(ex)) ⇒
+              doFailStage(ex)
+            case HubCompleted(None)     ⇒
+              if (!promise.isCompleted)
+                promise.success(-2) // to throw away data
+              completeStage()
             case Wakeup ⇒
               if (isAvailable(out)) onPull()
             case Initialize ⇒
-              if (isAvailable(out) && (hubCallback ne null)) {
+              if (!promise.isCompleted)
                 promise.success(id)
+
+              if (isAvailable(out) && (hubCallback ne null)) {
                 onPull()
-              } else promise.failure(new Exception("Failed before initialization"))
+              }
           }
         }
 

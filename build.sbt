@@ -1,6 +1,6 @@
 name := "natoma-akka-tools"
 
-version := "0.1"
+version := "0.2"
 
 scalaVersion := "2.12.7"
 resolvers += Resolver.jcenterRepo
