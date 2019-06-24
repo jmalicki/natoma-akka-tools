@@ -1,26 +1,22 @@
 name := "natoma-akka-tools"
 
-version := "0.3"
+version := "0.3.1"
 
-scalaVersion := "2.12.7"
+crossScalaVersions := Seq("2.12.8", "2.13.0")
 resolvers += Resolver.jcenterRepo
 
 autoScalaLibrary := true
 
-val akkaVersion = "2.5.18"
+val akkaVersion = "2.5.23"
 libraryDependencies ++= Seq(
   "com.typesafe.akka" %% "akka-actor" % akkaVersion,
   "com.typesafe.akka" %% "akka-stream" % akkaVersion,
 )
 
-// Find errors in scalatest
-resolvers += "Artima Maven Repository" at "http://repo.artima.com/releases"
-addSbtPlugin("com.artima.supersafe" % "sbtplugin" % "1.1.7")
-
 // Test dependencies
 libraryDependencies ++= Seq(
-  "org.scalatest" %% "scalatest" % "3.0.5" % Test,
-  "org.scalamock" %% "scalamock" % "4.1.0" % Test,
+  "org.scalatest" %% "scalatest" % "3.0.8" % Test,
+  "org.scalamock" %% "scalamock" % "4.3.0" % Test,
   "com.typesafe.akka" %% "akka-testkit" % akkaVersion % Test,
   "com.typesafe.akka" %% "akka-stream-testkit" % akkaVersion % Test,
 )
