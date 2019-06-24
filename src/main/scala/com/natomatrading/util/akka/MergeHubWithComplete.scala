@@ -104,7 +104,7 @@ private[akka] class MergeHubWithComplete[T](perProducerBufferSize: Int, complete
     @volatile private[this] var shuttingDown = false
 
     private[this] val demands = scala.collection.mutable.LongMap.empty[InputState]
-    private[this] val wakeupCallback = getAsyncCallback[NotUsed]((_) ⇒
+    private[this] val wakeupCallback = getAsyncCallback[NotUsed]((_) =>
       // We are only allowed to dequeue if we are not backpressured. See comment in tryProcessNext() for details.
       if (isAvailable(out)) tryProcessNext(firstAttempt = true))
 
@@ -112,14 +112,14 @@ private[akka] class MergeHubWithComplete[T](perProducerBufferSize: Int, complete
 
     // Returns true when we have not consumed demand, false otherwise
     private def onEvent(ev: Event): Boolean = ev match {
-      case Element(id, elem) ⇒
+      case Element(id, elem) =>
         demands(id).onElement()
         push(out, elem)
         false
-      case Register(id, callback) ⇒
+      case Register(id, callback) =>
         demands.put(id, new InputState(callback))
         true
-      case Deregister(id) ⇒
+      case Deregister(id) =>
         demands.remove(id)
         if (demands.isEmpty) {
           shuttingDown = true
@@ -197,8 +197,8 @@ private[akka] class MergeHubWithComplete[T](perProducerBufferSize: Int, complete
       var event = queue.poll()
       while (event ne null) {
         event match {
-          case Register(_, demandCallback) ⇒ demandCallback.invoke(MergeHubWithComplete.Cancel)
-          case _                           ⇒
+          case Register(_, demandCallback) => demandCallback.invoke(MergeHubWithComplete.Cancel)
+          case _                           =>
         }
         event = queue.poll()
       }
@@ -278,8 +278,8 @@ private[akka] class MergeHubWithComplete[T](perProducerBufferSize: Int, complete
 
     // propagate LogLevels attribute so that MergeHub can be used with onFailure = LogLevels.Off
     val sinkWithAttributes = inheritedAttributes.get[LogLevels] match {
-      case Some(a) ⇒ Sink.fromGraph(sink).addAttributes(Attributes(a))
-      case None    ⇒ Sink.fromGraph(sink)
+      case Some(a) => Sink.fromGraph(sink).addAttributes(Attributes(a))
+      case None    => Sink.fromGraph(sink)
     }
 
     (logic, sinkWithAttributes)

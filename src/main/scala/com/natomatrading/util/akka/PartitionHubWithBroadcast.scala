@@ -72,7 +72,7 @@ object PartitionHubWithBroadcast {
     * @param bufferSize Total number of elements that can be buffered. If this buffer is full, the producer
     *   is backpressured.
     */
-  @ApiMayChange def statefulSink[T](partitioner: () ⇒ (ConsumerInfo, T) ⇒ Long, startAfterNrOfConsumers: Int,
+  @ApiMayChange def statefulSink[T](partitioner: () => (ConsumerInfo, T) => Long, startAfterNrOfConsumers: Int,
                                     bufferSize: Int = defaultBufferSize): Sink[T, Source[T, Future[Long]]] =
     Sink.fromGraph(new PartitionHubWithBroadcast[T](partitioner, startAfterNrOfConsumers, bufferSize))
 
@@ -107,15 +107,15 @@ object PartitionHubWithBroadcast {
     *   is backpressured.
     */
   @ApiMayChange
-  def sink[T](partitioner: (Int, T) ⇒ Int, startAfterNrOfConsumers: Int,
+  def sink[T](partitioner: (Int, T) => Int, startAfterNrOfConsumers: Int,
               bufferSize: Int = defaultBufferSize): Sink[T, Source[T, Future[Long]]] = {
-    val fun: (ConsumerInfo, T) ⇒ Long = { (info, elem) ⇒
+    val fun: (ConsumerInfo, T) => Long = { (info, elem) =>
       val idx = partitioner(info.size, elem)
       if (idx < -1) -2L
       else if (idx == -1) -1L
       else info.consumerIdByIdx(idx)
     }
-    statefulSink(() ⇒ fun, startAfterNrOfConsumers, bufferSize)
+    statefulSink(() => fun, startAfterNrOfConsumers, bufferSize)
   }
 
   @DoNotInherit @ApiMayChange trait ConsumerInfo {
@@ -267,8 +267,8 @@ object PartitionHubWithBroadcast {
 
       override def remove(id: Long): Unit = {
         queues.remove(id) match {
-          case null  ⇒
-          case queue ⇒ _totalSize.addAndGet(-queue.size)
+          case null  =>
+          case queue => _totalSize.addAndGet(-queue.size)
         }
       }
 
@@ -280,7 +280,7 @@ object PartitionHubWithBroadcast {
   * INTERNAL API
   */
 @InternalApi private[akka] class PartitionHubWithBroadcast[T](
-                                                  partitioner:             () ⇒ (PartitionHubWithBroadcast.ConsumerInfo, T) ⇒ Long,
+                                                  partitioner:             () => (PartitionHubWithBroadcast.ConsumerInfo, T) => Long,
                                                   startAfterNrOfConsumers: Int, bufferSize: Int)
   extends GraphStageWithMaterializedValue[SinkShape[T], Source[T, Future[Long]]] {
   import PartitionHubWithBroadcast.Internal._
@@ -314,7 +314,7 @@ object PartitionHubWithBroadcast {
     private var callbackCount = 0L
 
     private final class ConsumerInfoImpl(val consumers: Vector[Consumer])
-      extends ConsumerInfo { info ⇒
+      extends ConsumerInfo { info =>
 
       override def queueSize(consumerId: Long): Int =
         queue.size(consumerId)
@@ -368,8 +368,8 @@ object PartitionHubWithBroadcast {
 
     private def wakeup(id: Long): Unit = {
       needWakeup.get(id) match {
-        case None ⇒ // ignore
-        case Some(consumer) ⇒
+        case None => // ignore
+        case Some(consumer) =>
           needWakeup -= id
           consumer.callback.invoke(Wakeup)
       }
@@ -383,7 +383,7 @@ object PartitionHubWithBroadcast {
       if (consumerInfo.consumers.isEmpty)
         completeStage()
       else {
-        consumerInfo.consumers.foreach(c ⇒ complete(c.id))
+        consumerInfo.consumers.foreach(c => complete(c.id))
       }
     }
 
@@ -400,7 +400,7 @@ object PartitionHubWithBroadcast {
     private def onEvent(ev: HubEvent): Unit = {
       callbackCount += 1
       ev match {
-        case NeedWakeup(consumer) ⇒
+        case NeedWakeup(consumer) =>
           // Also check if the consumer is now unblocked since we published an element since it went asleep.
           if (queue.nonEmpty(consumer.id))
             consumer.callback.invoke(Wakeup)
@@ -409,11 +409,11 @@ object PartitionHubWithBroadcast {
             tryPull()
           }
 
-        case TryPull ⇒
+        case TryPull =>
           tryPull()
 
-        case RegistrationPending ⇒
-          state.getAndSet(noRegistrationsState).asInstanceOf[Open].registrations foreach { consumer ⇒
+        case RegistrationPending =>
+          state.getAndSet(noRegistrationsState).asInstanceOf[Open].registrations foreach { consumer =>
             val newConsumers = (consumerInfo.consumers :+ consumer).sortBy(_.id)
             consumerInfo = new ConsumerInfoImpl(newConsumers)
             queue.init(consumer.id)
@@ -431,7 +431,7 @@ object PartitionHubWithBroadcast {
             tryPull()
           }
 
-        case UnRegister(id) ⇒
+        case UnRegister(id) =>
           val newConsumers = consumerInfo.consumers.filterNot(_.id == id)
           consumerInfo = new ConsumerInfoImpl(newConsumers)
           queue.remove(id)
@@ -446,12 +446,12 @@ object PartitionHubWithBroadcast {
       val failMessage = HubCompleted(Some(ex))
 
       // Notify pending consumers and set tombstone
-      state.getAndSet(Closed(Some(ex))).asInstanceOf[Open].registrations foreach { consumer ⇒
+      state.getAndSet(Closed(Some(ex))).asInstanceOf[Open].registrations foreach { consumer =>
         consumer.callback.invoke(failMessage)
       }
 
       // Notify registered consumers
-      consumerInfo.consumers.foreach { consumer ⇒
+      consumerInfo.consumers.foreach { consumer =>
         consumer.callback.invoke(failMessage)
       }
       failStage(ex)
@@ -461,11 +461,11 @@ object PartitionHubWithBroadcast {
       // Notify pending consumers and set tombstone
 
       @tailrec def tryClose(): Unit = state.get() match {
-        case Closed(_) ⇒ // Already closed, ignore
-        case open: Open ⇒
+        case Closed(_) => // Already closed, ignore
+        case open: Open =>
           if (state.compareAndSet(open, Closed(None))) {
             val completedMessage = HubCompleted(None)
-            open.registrations foreach { consumer ⇒
+            open.registrations foreach { consumer =>
               consumer.callback.invoke(completedMessage)
             }
           } else tryClose()
@@ -514,20 +514,20 @@ object PartitionHubWithBroadcast {
         }
 
         override def preStart(): Unit = {
-          val onHubReady: Try[AsyncCallback[HubEvent]] ⇒ Unit = {
-            case Success(callback) ⇒
+          val onHubReady: Try[AsyncCallback[HubEvent]] => Unit = {
+            case Success(callback) =>
               hubCallback = callback
               callback.invoke(RegistrationPending)
               if (isAvailable(out)) onPull()
-            case Failure(ex) ⇒
+            case Failure(ex) =>
               doFailStage(ex)
           }
 
           @tailrec def register(): Unit = {
             logic.state.get() match {
-              case Closed(Some(ex)) ⇒ doFailStage(ex)
-              case Closed(None)     ⇒ completeStage()
-              case previousState @ Open(callbackFuture, registrations) ⇒
+              case Closed(Some(ex)) => doFailStage(ex)
+              case Closed(None)     => completeStage()
+              case previousState @ Open(callbackFuture, registrations) =>
                 val newRegistrations = consumer :: registrations
                 if (logic.state.compareAndSet(previousState, Open(callbackFuture, newRegistrations))) {
                   callbackFuture.onComplete(getAsyncCallback(onHubReady).invoke)(materializer.executionContext)
@@ -544,11 +544,11 @@ object PartitionHubWithBroadcast {
             val elem = logic.poll(id, hubCallback)
 
             elem match {
-              case null ⇒
+              case null =>
                 hubCallback.invoke(NeedWakeup(consumer))
-              case Completed ⇒
+              case Completed =>
                 completeStage()
-              case _ ⇒
+              case _ =>
                 push(out, elem.asInstanceOf[T])
             }
           }
@@ -562,15 +562,15 @@ object PartitionHubWithBroadcast {
         private def onCommand(cmd: ConsumerEvent): Unit = {
           callbackCount += 1
           cmd match {
-            case HubCompleted(Some(ex)) ⇒
+            case HubCompleted(Some(ex)) =>
               doFailStage(ex)
-            case HubCompleted(None)     ⇒
+            case HubCompleted(None)     =>
               if (!promise.isCompleted)
                 promise.success(-2) // to throw away data
               completeStage()
-            case Wakeup ⇒
+            case Wakeup =>
               if (isAvailable(out)) onPull()
-            case Initialize ⇒
+            case Initialize =>
               if (!promise.isCompleted)
                 promise.success(id)
 
