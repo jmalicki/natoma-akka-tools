@@ -73,9 +73,9 @@ private[akka] class MergeHubWithComplete[T](perProducerBufferSize: Int, complete
     def id: Long
   }
 
-  private final case class Element(id: Long, elem: T) extends Event
-  private final case class Register(id: Long, demandCallback: AsyncCallback[Long]) extends Event
-  private final case class Deregister(id: Long) extends Event
+  private case class Element(id: Long, elem: T) extends Event
+  private case class Register(id: Long, demandCallback: AsyncCallback[Long]) extends Event
+  private case class Deregister(id: Long) extends Event
 
   final class InputState(signalDemand: AsyncCallback[Long]) {
     private var untilNextDemandSignal = DemandThreshold
