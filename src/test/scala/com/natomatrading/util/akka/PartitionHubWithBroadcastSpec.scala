@@ -280,7 +280,9 @@ class PartitionHubWithBroadcastSpec extends FlatSpec with Matchers with ScalaFut
   }
 
   it should "broadcast the same elements to consumers attaching around the same time" in assertAllStagesStopped {
-    val (firstElem, source) = Source.maybe[Int].concat(Source(2 to 10)).toMat(PartitionHubWithBroadcast.sink((size, elem) => -1, startAfterNrOfConsumers = 2, bufferSize = 8))(Keep.both).run()
+    val (firstElem, source) = Source.maybe[Int].concat(Source(2 to 10))
+      .toMat(PartitionHubWithBroadcast.sink((size, elem) => -1, startAfterNrOfConsumers = 2, bufferSize = 8))(Keep.both)
+      .run()
 
     val f1 = source.runWith(Sink.seq)
     val f2 = source.runWith(Sink.seq)
@@ -291,7 +293,10 @@ class PartitionHubWithBroadcastSpec extends FlatSpec with Matchers with ScalaFut
   }
 
   it should "broadcast the same prefix to consumers attaching around the same time if one cancels earlier" in assertAllStagesStopped {
-    val (firstElem, source) = Source.maybe[Int].concat(Source(2 to 20)).toMat(PartitionHubWithBroadcast.sink((size, elem) => -1, startAfterNrOfConsumers = 2, bufferSize = 8))(Keep.both).run()
+    val (firstElem, source) = Source.maybe[Int]
+      .concat(Source(2 to 20)).toMat(
+        PartitionHubWithBroadcast.sink((size, elem) => -1, startAfterNrOfConsumers = 2, bufferSize = 8)
+      )(Keep.both).run()
 
     val f1 = source.runWith(Sink.seq)
     val f2 = source.take(10).runWith(Sink.seq)
@@ -311,7 +316,10 @@ class PartitionHubWithBroadcastSpec extends FlatSpec with Matchers with ScalaFut
 */
 
   it should "send the same elements to consumers of different speed attaching around the same time" in assertAllStagesStopped {
-    val (firstElem, source) = Source.maybe[Int].concat(Source(2 to 10)).toMat(PartitionHubWithBroadcast.sink((size, elem) => -1, startAfterNrOfConsumers = 2, bufferSize = 8))(Keep.both).run()
+    val (firstElem, source) = Source.maybe[Int]
+      .concat(Source(2 to 10)).toMat(
+        PartitionHubWithBroadcast.sink((size, elem) => -1, startAfterNrOfConsumers = 2, bufferSize = 8)
+      )(Keep.both).run()
 
     val f1 = source.throttle(1, 10.millis, 3, ThrottleMode.shaping).runWith(Sink.seq)
     val f2 = source.runWith(Sink.seq)
@@ -354,7 +362,8 @@ class PartitionHubWithBroadcastSpec extends FlatSpec with Matchers with ScalaFut
 
 
   it should "broadcast the same elements to consumers attaching around the same time with a buffer size of one" in assertAllStagesStopped {
-    val (firstElem, source) = Source.maybe[Int].concat(Source(2 to 10)).toMat(PartitionHubWithBroadcast.sink((size, elem) => -1, startAfterNrOfConsumers = 2, bufferSize = 1))(Keep.both).run()
+    val (firstElem, source) = Source.maybe[Int].concat(Source(2 to 10))
+      .toMat(PartitionHubWithBroadcast.sink((size, elem) => -1, startAfterNrOfConsumers = 2, bufferSize = 1))(Keep.both).run()
 
     val f1 = source.runWith(Sink.seq)
     val f2 = source.runWith(Sink.seq)
@@ -366,7 +375,8 @@ class PartitionHubWithBroadcastSpec extends FlatSpec with Matchers with ScalaFut
 
   it should "be able to implement a keep-dropping-if-unsubscribed policy with a simple Sink.ignore" in assertAllStagesStopped {
     val killSwitch = KillSwitches.shared("test-switch")
-    val source = Source.fromIterator(() ⇒ Iterator.from(0)).via(killSwitch.flow).runWith(PartitionHubWithBroadcast.sink((size, elem) => -1, startAfterNrOfConsumers = 1, bufferSize = 8))
+    val source = Source.fromIterator(() ⇒ Iterator.from(0)).via(killSwitch.flow)
+      .runWith(PartitionHubWithBroadcast.sink((size, elem) => -1, startAfterNrOfConsumers = 1, bufferSize = 8))
 
     // Now the Hub "drops" elements until we attach a new consumer (Source.ignore consumes as fast as possible)
     source.runWith(Sink.ignore)
@@ -391,7 +401,8 @@ class PartitionHubWithBroadcastSpec extends FlatSpec with Matchers with ScalaFut
 
   it should "properly signal broadcast error to consumers" in assertAllStagesStopped {
     val upstream = TestPublisher.probe[Int]()
-    val source = Source.fromPublisher(upstream).runWith(PartitionHubWithBroadcast.sink((size, elem) => -1, startAfterNrOfConsumers = 2, bufferSize = 8))
+    val source = Source.fromPublisher(upstream)
+      .runWith(PartitionHubWithBroadcast.sink((size, elem) => -1, startAfterNrOfConsumers = 2, bufferSize = 8))
 
     val downstream1 = TestSubscriber.probe[Int]()
     val downstream2 = TestSubscriber.probe[Int]()
@@ -401,7 +412,7 @@ class PartitionHubWithBroadcastSpec extends FlatSpec with Matchers with ScalaFut
     downstream1.request(4)
     downstream2.request(8)
 
-    (1 to 8) foreach (upstream.sendNext(_))
+    (1 to 8) foreach upstream.sendNext
 
     downstream1.expectNext(1, 2, 3, 4)
     downstream2.expectNext(1, 2, 3, 4, 5, 6, 7, 8)

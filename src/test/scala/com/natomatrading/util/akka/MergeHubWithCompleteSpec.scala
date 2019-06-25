@@ -14,6 +14,7 @@ import org.scalatest.concurrent.PatienceConfiguration.Timeout
 import org.scalatest.{FlatSpec, Matchers}
 import org.scalatest.concurrent.ScalaFutures
 
+import scala.concurrent.Promise
 import scala.concurrent.duration._
 import scala.language.postfixOps
 
@@ -28,8 +29,11 @@ class MergeHubWithCompleteSpec extends FlatSpec with Matchers with ScalaFutures 
 
   it should "work in the happy case" in assertAllStagesStopped {
     val (sink, result) = MergeHubWithComplete.source[Int](16).take(20).toMat(Sink.seq)(Keep.both).run()
-    Source(1 to 10).runWith(sink)
-    Source(11 to 20).runWith(sink)
+    val promise1:Promise[Option[Int]] = Source.maybe[Int].concat(Source(1 to 10)).toMat(sink)(Keep.left).run()
+    val promise2:Promise[Option[Int]] = Source.maybe[Int].concat(Source(11 to 20)).toMat(sink)(Keep.left).run()
+
+    promise1.success(None)
+    promise2.success(None)
 
     result.futureValue.sorted should ===(1 to 20)
   }
