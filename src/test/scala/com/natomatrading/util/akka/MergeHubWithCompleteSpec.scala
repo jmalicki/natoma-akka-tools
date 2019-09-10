@@ -7,9 +7,9 @@ package com.natomatrading.util.akka
 import akka.actor.ActorSystem
 import akka.stream.scaladsl.{Keep, Sink, Source}
 import akka.stream.{ActorMaterializer, ThrottleMode}
-import akka.stream.testkit.{TestPublisher, TestSubscriber}
+import akka.stream.testkit.TestPublisher
 import akka.stream.testkit.scaladsl.StreamTestKit._
-import akka.testkit.EventFilter
+import akka.testkit.filterException
 import org.scalatest.concurrent.PatienceConfiguration.Timeout
 import org.scalatest.{FlatSpec, Matchers}
 import org.scalatest.concurrent.ScalaFutures
@@ -124,9 +124,10 @@ class MergeHubWithCompleteSpec extends FlatSpec with Matchers with ScalaFutures 
     result.futureValue.sorted should ===(1 to 2000)
   }
 
-  it should "keep working even if one of the producers fail (traceback expected)" in assertAllStagesStopped {
-    val (sink, result) = MergeHubWithComplete.source[Int](16).take(10).toMat(Sink.seq)(Keep.both).run()
-    EventFilter.error("Upstream producer failed with exception").intercept {
+  it should "keep working even if one of the producers fail" in assertAllStagesStopped {
+    filterException[MergeHubWithComplete.ProducerFailed] {
+
+      val (sink, result) = MergeHubWithComplete.source[Int](16).take(10).toMat(Sink.seq)(Keep.both).run()
       val maybe1 = Source.maybe[Int].toMat(sink)(Keep.left).run()
       val maybe2 = Source.maybe[Int].concat(Source(2 to 10)).toMat(sink)(Keep.left).run()
 
@@ -134,9 +135,7 @@ class MergeHubWithCompleteSpec extends FlatSpec with Matchers with ScalaFutures 
       Thread.sleep(100)
       maybe1.failure(TE("failing"))
       maybe2.success(Some(1))
+      result.futureValue.sorted should ===(1 to 10)
     }
-
-    result.futureValue.sorted should ===(1 to 10)
-
   }
 }

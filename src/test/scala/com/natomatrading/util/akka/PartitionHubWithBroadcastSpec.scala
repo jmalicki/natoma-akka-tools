@@ -11,7 +11,6 @@ import akka.stream.scaladsl.{Keep, Sink, Source}
 import akka.stream.testkit.scaladsl.StreamTestKit.assertAllStagesStopped
 import akka.stream.testkit.scaladsl.{TestSink, TestSource}
 import akka.stream.testkit.{TestPublisher, TestSubscriber}
-import org.scalatest.concurrent.PatienceConfiguration.Timeout
 import org.scalatest.{FlatSpec, Matchers}
 
 import scala.concurrent.duration._
