@@ -4,11 +4,11 @@ import akka.actor.ActorSystem
 import akka.stream.ActorMaterializer
 import akka.stream.scaladsl.Keep
 import akka.stream.testkit.scaladsl.{TestSink, TestSource}
-import org.scalatest.FlatSpec
+import org.scalatest.flatspec.AnyFlatSpec
 
 import scala.concurrent.duration._
 
-class CloseAndErrorPropagatorSpec extends FlatSpec {
+class CloseAndErrorPropagatorSpec extends AnyFlatSpec {
   behavior of "CloseAndErrorPropagator"
 
   implicit val system:ActorSystem = ActorSystem()

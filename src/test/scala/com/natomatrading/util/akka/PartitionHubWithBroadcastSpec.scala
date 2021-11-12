@@ -11,7 +11,8 @@ import akka.stream.scaladsl.{Keep, Sink, Source}
 import akka.stream.testkit.scaladsl.StreamTestKit.assertAllStagesStopped
 import akka.stream.testkit.scaladsl.{TestSink, TestSource}
 import akka.stream.testkit.{TestPublisher, TestSubscriber}
-import org.scalatest.{FlatSpec, Matchers}
+import org.scalatest.flatspec.AnyFlatSpec
+import org.scalatest.matchers.should.Matchers
 
 import scala.concurrent.duration._
 import scala.concurrent.Await
@@ -19,7 +20,7 @@ import org.scalatest.concurrent.ScalaFutures
 
 import scala.language.postfixOps
 
-class PartitionHubWithBroadcastSpec extends FlatSpec with Matchers with ScalaFutures {
+class PartitionHubWithBroadcastSpec extends AnyFlatSpec with Matchers with ScalaFutures {
   override implicit val patienceConfig = PatienceConfig(timeout = 300 millis)
 
 
@@ -29,12 +30,12 @@ class PartitionHubWithBroadcastSpec extends FlatSpec with Matchers with ScalaFut
   behavior of "PartitionHubWithBroadcast"
 
   it should "work in the happy case with one stream" in assertAllStagesStopped {
-    val source = Source(1 to 10).runWith(PartitionHubWithBroadcast.sink((size, elem) ⇒ 0, startAfterNrOfConsumers = 0, bufferSize = 8))
+    val source = Source(1 to 10).runWith(PartitionHubWithBroadcast.sink((size, elem) => 0, startAfterNrOfConsumers = 0, bufferSize = 8))
     source.runWith(Sink.seq).futureValue should ===(1 to 10)
   }
 
   it should "work in the happy case with two streams" in assertAllStagesStopped {
-    val source = Source(0 until 10).runWith(PartitionHubWithBroadcast.sink((size, elem) ⇒ elem % size, startAfterNrOfConsumers = 2, bufferSize = 8))
+    val source = Source(0 until 10).runWith(PartitionHubWithBroadcast.sink((size, elem) => elem % size, startAfterNrOfConsumers = 2, bufferSize = 8))
     val (future1, result1) = source.toMat(Sink.seq)(Keep.both).run()
 
     // Ensure that this future goes first
@@ -47,10 +48,10 @@ class PartitionHubWithBroadcastSpec extends FlatSpec with Matchers with ScalaFut
   }
 
   it should "be able to use as round-robin router" in assertAllStagesStopped {
-    val source = Source(0 until 10).runWith(PartitionHubWithBroadcast.statefulSink(() ⇒ {
+    val source = Source(0 until 10).runWith(PartitionHubWithBroadcast.statefulSink(() => {
       var n = 0L
 
-      (info, elem) ⇒ {
+      (info, elem) => {
         n += 1
         info.consumerIdByIdx((n % info.size).toInt)
       }
@@ -62,14 +63,14 @@ class PartitionHubWithBroadcastSpec extends FlatSpec with Matchers with ScalaFut
   }
 
   it should "be able to use as sticky session router" in assertAllStagesStopped {
-    val source = Source(List("usr-1", "usr-2", "usr-1", "usr-3")).runWith(PartitionHubWithBroadcast.statefulSink(() ⇒ {
+    val source = Source(List("usr-1", "usr-2", "usr-1", "usr-3")).runWith(PartitionHubWithBroadcast.statefulSink(() => {
       var sessions = Map.empty[String, Long]
       var n = 0L
 
-      (info, elem) ⇒ {
+      (info, elem) => {
         sessions.get(elem) match {
-          case Some(id) if info.consumerIds.exists(_ == id) ⇒ id
-          case _ ⇒
+          case Some(id) if info.consumerIds.exists(_ == id) => id
+          case _ =>
             n += 1
             val id = info.consumerIdByIdx((n % info.size).toInt)
             sessions = sessions.updated(elem, id)
@@ -85,7 +86,7 @@ class PartitionHubWithBroadcastSpec extends FlatSpec with Matchers with ScalaFut
 
   it should "be able to use as fastest consumer router" in assertAllStagesStopped {
     val source = Source(0 until 1000).runWith(PartitionHubWithBroadcast.statefulSink(
-      () ⇒ (info, elem) ⇒ info.consumerIds.toVector.minBy(id ⇒ info.queueSize(id)),
+      () => (info, elem) => info.consumerIds.toVector.minBy(id => info.queueSize(id)),
       startAfterNrOfConsumers = 2, bufferSize = 4))
     val result1 = source.runWith(Sink.seq)
     val result2 = source.throttle(10, 100.millis, 10, ThrottleMode.Shaping).runWith(Sink.seq)
@@ -95,7 +96,7 @@ class PartitionHubWithBroadcastSpec extends FlatSpec with Matchers with ScalaFut
 
   it should "route evenly" in assertAllStagesStopped {
     val (testSource, hub) = TestSource.probe[Int].toMat(
-      PartitionHubWithBroadcast.sink((size, elem) ⇒ elem % size, startAfterNrOfConsumers = 2, bufferSize = 8))(Keep.both).run()
+      PartitionHubWithBroadcast.sink((size, elem) => elem % size, startAfterNrOfConsumers = 2, bufferSize = 8))(Keep.both).run()
     val probe0 = hub.runWith(TestSink.probe[Int])
     val probe1 = hub.runWith(TestSink.probe[Int])
     probe0.request(3)
@@ -129,7 +130,7 @@ class PartitionHubWithBroadcastSpec extends FlatSpec with Matchers with ScalaFut
 
   it should "route unevenly" in assertAllStagesStopped {
     val (testSource, hub) = TestSource.probe[Int].toMat(
-      PartitionHubWithBroadcast.sink((size, elem) ⇒ (elem % 3) % 2, startAfterNrOfConsumers = 2, bufferSize = 8))(Keep.both).run()
+      PartitionHubWithBroadcast.sink((size, elem) => (elem % 3) % 2, startAfterNrOfConsumers = 2, bufferSize = 8))(Keep.both).run()
     val probe0 = hub.runWith(TestSink.probe[Int])
     val probe1 = hub.runWith(TestSink.probe[Int])
 
@@ -160,7 +161,7 @@ class PartitionHubWithBroadcastSpec extends FlatSpec with Matchers with ScalaFut
 
   it should "backpressure" in assertAllStagesStopped {
     val (testSource, hub) = TestSource.probe[Int].toMat(
-      PartitionHubWithBroadcast.sink((size, elem) ⇒ 0, startAfterNrOfConsumers = 2, bufferSize = 4))(Keep.both).run()
+      PartitionHubWithBroadcast.sink((size, elem) => 0, startAfterNrOfConsumers = 2, bufferSize = 4))(Keep.both).run()
     val probe0 = hub.runWith(TestSink.probe[Int])
     val probe1 = hub.runWith(TestSink.probe[Int])
     probe0.request(10)
@@ -183,7 +184,7 @@ class PartitionHubWithBroadcastSpec extends FlatSpec with Matchers with ScalaFut
 
   it should "ensure that from two different speed consumers the slower controls the rate" in assertAllStagesStopped {
     val (firstElem, source) = Source.maybe[Int].concat(Source(1 until 20)).toMat(
-      PartitionHubWithBroadcast.sink((size, elem) ⇒ elem % size, startAfterNrOfConsumers = 2, bufferSize = 1))(Keep.both).run()
+      PartitionHubWithBroadcast.sink((size, elem) => elem % size, startAfterNrOfConsumers = 2, bufferSize = 1))(Keep.both).run()
 
     val f1 = source.throttle(1, 10.millis, 1, ThrottleMode.shaping).runWith(Sink.seq)
     // Second cannot be overwhelmed since the first one throttles the overall rate, and second allows a higher rate
@@ -198,7 +199,7 @@ class PartitionHubWithBroadcastSpec extends FlatSpec with Matchers with ScalaFut
   it should "properly signal error to consumers" in assertAllStagesStopped {
     val upstream = TestPublisher.probe[Int]()
     val source = Source.fromPublisher(upstream).runWith(
-      PartitionHubWithBroadcast.sink((size, elem) ⇒ elem % size, startAfterNrOfConsumers = 2, bufferSize = 8))
+      PartitionHubWithBroadcast.sink((size, elem) => elem % size, startAfterNrOfConsumers = 2, bufferSize = 8))
 
     val downstream1 = TestSubscriber.probe[Int]()
     source.runWith(Sink.fromSubscriber(downstream1))
@@ -223,7 +224,7 @@ class PartitionHubWithBroadcastSpec extends FlatSpec with Matchers with ScalaFut
   }
 
   it should "properly signal completion to consumers arriving after producer finished" in assertAllStagesStopped {
-    val source = Source.empty[Int].runWith(PartitionHubWithBroadcast.sink((size, elem) ⇒ elem % size, startAfterNrOfConsumers = 0))
+    val source = Source.empty[Int].runWith(PartitionHubWithBroadcast.sink((size, elem) => elem % size, startAfterNrOfConsumers = 0))
     // Wait enough so the Hub gets the completion. This is racy, but this is fine because both
     // cases should work in the end
     //Thread.sleep(10)
@@ -234,7 +235,7 @@ class PartitionHubWithBroadcastSpec extends FlatSpec with Matchers with ScalaFut
   it should "remember completion for materialisations after completion" in {
 
     val (sourceProbe, source) = TestSource.probe[Unit].toMat(
-      PartitionHubWithBroadcast.sink((size, elem) ⇒ 0, startAfterNrOfConsumers = 0))(Keep.both).run()
+      PartitionHubWithBroadcast.sink((size, elem) => 0, startAfterNrOfConsumers = 0))(Keep.both).run()
     val sinkProbe = source.runWith(TestSink.probe[Unit])
 
     sourceProbe.sendComplete()
@@ -252,7 +253,7 @@ class PartitionHubWithBroadcastSpec extends FlatSpec with Matchers with ScalaFut
 
   it should "properly signal error to consumers arriving after producer finished" in assertAllStagesStopped {
     val source = Source.failed[Int](TE("Fail!")).runWith(
-      PartitionHubWithBroadcast.sink((size, elem) ⇒ 0, startAfterNrOfConsumers = 0))
+      PartitionHubWithBroadcast.sink((size, elem) => 0, startAfterNrOfConsumers = 0))
     // Wait enough so the Hub gets the failure. This is racy, but this is fine because both
     // cases should work in the end
     //Thread.sleep(10)
@@ -264,7 +265,7 @@ class PartitionHubWithBroadcastSpec extends FlatSpec with Matchers with ScalaFut
 
   it should "drop elements with an index less than -1" in assertAllStagesStopped {
     val source = Source(0 until 10).runWith(PartitionHubWithBroadcast.sink(
-      (size, elem) ⇒ if (elem == 3 || elem == 4) -2 else elem % size, startAfterNrOfConsumers = 2, bufferSize = 8))
+      (size, elem) => if (elem == 3 || elem == 4) -2 else elem % size, startAfterNrOfConsumers = 2, bufferSize = 8))
     val result1 = source.runWith(Sink.seq)
     val result2 = source.runWith(Sink.seq)
     result1.futureValue should ===((0 to 8 by 2).filterNot(_ == 4))
@@ -374,7 +375,7 @@ class PartitionHubWithBroadcastSpec extends FlatSpec with Matchers with ScalaFut
 
   it should "be able to implement a keep-dropping-if-unsubscribed policy with a simple Sink.ignore" in assertAllStagesStopped {
     val killSwitch = KillSwitches.shared("test-switch")
-    val source = Source.fromIterator(() ⇒ Iterator.from(0)).via(killSwitch.flow)
+    val source = Source.fromIterator(() => Iterator.from(0)).via(killSwitch.flow)
       .runWith(PartitionHubWithBroadcast.sink((size, elem) => -1, startAfterNrOfConsumers = 1, bufferSize = 8))
 
     // Now the Hub "drops" elements until we attach a new consumer (Source.ignore consumes as fast as possible)
@@ -388,7 +389,7 @@ class PartitionHubWithBroadcastSpec extends FlatSpec with Matchers with ScalaFut
     downstream.request(1)
     val first = downstream.expectNext()
 
-    for (i ← (first + 1) to (first + 10)) {
+    for (i <- (first + 1) to (first + 10)) {
       downstream.request(1)
       downstream.expectNext(i)
     }

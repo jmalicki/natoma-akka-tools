@@ -1,27 +1,29 @@
 name := "natoma-akka-tools"
 
-version := "0.3.1"
+version := "0.3.3"
 
-crossScalaVersions := Seq("2.12.9", "2.13.0")
+scalaVersion := "2.13.7"
 resolvers += Resolver.jcenterRepo
 
 autoScalaLibrary := true
 
-val akkaVersion = "2.5.25"
+val akkaVersion = "2.6.17"
 libraryDependencies ++= Seq(
   "com.typesafe.akka" %% "akka-actor" % akkaVersion,
   "com.typesafe.akka" %% "akka-stream" % akkaVersion,
 )
 
 // Test dependencies
+val scalaTestVersion = "3.2.9"
 libraryDependencies ++= Seq(
-  "org.scalatest" %% "scalatest" % "3.0.8" % Test,
-  "org.scalamock" %% "scalamock" % "4.4.0" % Test,
+  "org.scalatest" %% "scalatest" % scalaTestVersion % Test,
+  "org.scalatest" %% "scalatest-shouldmatchers" % scalaTestVersion % Test,
+  "org.scalamock" %% "scalamock" % "5.1.0" % Test,
   "com.typesafe.akka" %% "akka-testkit" % akkaVersion % Test,
   "com.typesafe.akka" %% "akka-stream-testkit" % akkaVersion % Test,
 )
 
-logBuffered in Test := false
+Test / logBuffered := false
 scalacOptions ++= Seq(
   "-unchecked",
   "-deprecation",

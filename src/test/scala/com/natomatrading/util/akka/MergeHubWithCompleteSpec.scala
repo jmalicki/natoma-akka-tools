@@ -11,14 +11,15 @@ import akka.stream.testkit.TestPublisher
 import akka.stream.testkit.scaladsl.StreamTestKit._
 import akka.testkit.filterException
 import org.scalatest.concurrent.PatienceConfiguration.Timeout
-import org.scalatest.{FlatSpec, Matchers}
+import org.scalatest.flatspec.AnyFlatSpec
+import org.scalatest.matchers.should.Matchers
 import org.scalatest.concurrent.ScalaFutures
 
 import scala.concurrent.Promise
 import scala.concurrent.duration._
 import scala.language.postfixOps
 
-class MergeHubWithCompleteSpec extends FlatSpec with Matchers with ScalaFutures {
+class MergeHubWithCompleteSpec extends AnyFlatSpec with Matchers with ScalaFutures {
   implicit val patience = PatienceConfig(timeout = 500 millis)
   implicit val timeout = Timeout(patienceConfig.timeout)
 
@@ -52,7 +53,7 @@ class MergeHubWithCompleteSpec extends FlatSpec with Matchers with ScalaFutures 
     val upstream = TestPublisher.probe[Int]()
 
     Source.fromPublisher(upstream).runWith(sink)
-    for (i ← 1 to 5) upstream.sendNext(i)
+    for (i <- 1 to 5) upstream.sendNext(i)
 
     upstream.expectCancellation()
     result.futureValue.sorted should ===(1 to 5)
@@ -64,7 +65,7 @@ class MergeHubWithCompleteSpec extends FlatSpec with Matchers with ScalaFutures 
     val upstream2 = TestPublisher.probe[Int]()
 
     Source.fromPublisher(upstream1).runWith(sink)
-    for (i ← 1 to 5) upstream1.sendNext(i)
+    for (i <- 1 to 5) upstream1.sendNext(i)
 
     upstream1.expectCancellation()
     result.futureValue.sorted should ===(1 to 5)
