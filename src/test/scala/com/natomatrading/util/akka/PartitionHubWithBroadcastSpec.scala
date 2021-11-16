@@ -21,7 +21,7 @@ import org.scalatest.concurrent.ScalaFutures
 import scala.language.postfixOps
 
 class PartitionHubWithBroadcastSpec extends AnyFlatSpec with Matchers with ScalaFutures {
-  override implicit val patienceConfig = PatienceConfig(timeout = 300 millis)
+  override implicit val patienceConfig = PatienceConfig(timeout = 1 second)
 
 
   implicit val system = ActorSystem()
