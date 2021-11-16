@@ -76,6 +76,7 @@ private[akka] class MergeHubWithComplete[T](perProducerBufferSize: Int, complete
   private case class Element(id: Long, elem: T) extends Event
   private case class Register(id: Long, demandCallback: AsyncCallback[Long]) extends Event
   private case class Deregister(id: Long) extends Event
+  private case class Failure(id: Long, ex: Throwable) extends Event
 
   final class InputState(signalDemand: AsyncCallback[Long]) {
     private var untilNextDemandSignal = DemandThreshold
@@ -126,6 +127,13 @@ private[akka] class MergeHubWithComplete[T](perProducerBufferSize: Int, complete
           complete(out)
         }
         true
+      case Failure(id, ex) =>
+        fail(out, ex)
+        true
+    }
+
+    override def onDownstreamFinish(cause: Throwable): Unit = {
+      super.onDownstreamFinish(cause)
     }
 
     override def onPull(): Unit = tryProcessNext(firstAttempt = true)
@@ -257,10 +265,8 @@ private[akka] class MergeHubWithComplete[T](perProducerBufferSize: Int, complete
           pull(in)
         }
 
-        // Make some noise
         override def onUpstreamFailure(ex: Throwable): Unit = {
-          throw new MergeHubWithComplete.ProducerFailed("Upstream producer failed with exception, " +
-            "removing from MergeHub now", ex)
+          logic.enqueue(Failure(id, ex))
         }
 
         private def onDemand(moreDemand: Long): Unit = {

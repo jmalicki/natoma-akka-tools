@@ -6,25 +6,34 @@ package com.natomatrading.util.akka
 
 import akka.actor.ActorSystem
 import akka.stream.scaladsl.{Keep, Sink, Source}
-import akka.stream.{ActorMaterializer, ThrottleMode}
+import akka.stream.ThrottleMode
 import akka.stream.testkit.TestPublisher
 import akka.stream.testkit.scaladsl.StreamTestKit._
-import akka.testkit.filterException
-import org.scalatest.concurrent.PatienceConfiguration.Timeout
-import org.scalatest.flatspec.AnyFlatSpec
+import org.scalatest.BeforeAndAfterAll
+import org.scalatest.flatspec.AsyncFlatSpec
 import org.scalatest.matchers.should.Matchers
-import org.scalatest.concurrent.ScalaFutures
 
-import scala.concurrent.Promise
+import scala.concurrent.{ExecutionContext, Future, Promise, blocking}
 import scala.concurrent.duration._
 import scala.language.postfixOps
+import scala.util.Success
 
-class MergeHubWithCompleteSpec extends AnyFlatSpec with Matchers with ScalaFutures {
-  implicit val patience = PatienceConfig(timeout = 500 millis)
-  implicit val timeout = Timeout(patienceConfig.timeout)
+class MergeHubWithCompleteSpec extends AsyncFlatSpec with Matchers with BeforeAndAfterAll {
 
-  implicit val system = ActorSystem()
-  implicit val mat = ActorMaterializer()
+  implicit var system:ActorSystem = null
+  implicit var ec:ExecutionContext = null
+
+  override def beforeAll(): Unit = {
+    system = ActorSystem()
+    ec = system.dispatcher
+  }
+
+  override def afterAll(): Unit = {
+    Thread.sleep(1000)
+    system.terminate()
+    system = null
+    ec = null
+  }
 
   behavior of "MergeHubWithComplete"
 
@@ -36,7 +45,7 @@ class MergeHubWithCompleteSpec extends AnyFlatSpec with Matchers with ScalaFutur
     promise1.success(None)
     promise2.success(None)
 
-    result.futureValue.sorted should ===(1 to 20)
+    result map { _.sorted } transformWith { _ should ===(Success(1 to 20)) }
   }
 
    it should "notify new producers if consumer cancels before first producer" in assertAllStagesStopped {
@@ -45,7 +54,7 @@ class MergeHubWithCompleteSpec extends AnyFlatSpec with Matchers with ScalaFutur
 
      Source.fromPublisher(upstream).runWith(sink)
 
-     upstream.expectCancellation()
+     Future { upstream.expectCancellation(); succeed }
    }
 
   it should "notify existing producers if consumer cancels after a few elements" in assertAllStagesStopped {
@@ -56,7 +65,7 @@ class MergeHubWithCompleteSpec extends AnyFlatSpec with Matchers with ScalaFutur
     for (i <- 1 to 5) upstream.sendNext(i)
 
     upstream.expectCancellation()
-    result.futureValue.sorted should ===(1 to 5)
+    result map {_.sorted} transformWith {_ should ===(Success(1 to 5))}
   }
 
   it should "notify new producers if consumer cancels after a few elements" in assertAllStagesStopped {
@@ -67,12 +76,15 @@ class MergeHubWithCompleteSpec extends AnyFlatSpec with Matchers with ScalaFutur
     Source.fromPublisher(upstream1).runWith(sink)
     for (i <- 1 to 5) upstream1.sendNext(i)
 
-    upstream1.expectCancellation()
-    result.futureValue.sorted should ===(1 to 5)
-
-    Source.fromPublisher(upstream2).runWith(sink)
-
-    upstream2.expectCancellation()
+    Future { upstream1.expectCancellation() } flatMap { _ =>
+      result map {_.sorted} transformWith {_ should ===(Success(1 to 5))}
+    } flatMap { _ =>
+      Source.fromPublisher(upstream2).runWith(sink)
+      Future {
+        upstream2.expectCancellation()
+        succeed
+      }
+    }
   }
 
   it should "work with long streams" in assertAllStagesStopped {
@@ -80,7 +92,7 @@ class MergeHubWithCompleteSpec extends AnyFlatSpec with Matchers with ScalaFutur
     Source(1 to 10000).runWith(sink)
     Source(10001 to 20000).runWith(sink)
 
-    result.futureValue.sorted should ===(1 to 20000)
+    result map {_.sorted} transformWith {_ should ===(Success(1 to 20000))}
   }
 
   it should "work with long streams when buffer size is 1" in assertAllStagesStopped {
@@ -95,12 +107,11 @@ class MergeHubWithCompleteSpec extends AnyFlatSpec with Matchers with ScalaFutur
     maybe1.success(Some(1))
     maybe2.success(Some(10001))
 
-    result.futureValue.sorted should ===(1 to 20000)
+    result map {_.sorted} transformWith {_ should ===(Success(1 to 20000)) }
   }
 
   it should "work with long streams when consumer is slower" in assertAllStagesStopped {
-    val (sink, result) =
-      MergeHubWithComplete.source[Int](16)
+    val (sink, result) = MergeHubWithComplete.source[Int](16)
         .take(2000)
         .throttle(10, 1.millisecond, 200, ThrottleMode.shaping)
         .toMat(Sink.seq)(Keep.both)
@@ -109,7 +120,7 @@ class MergeHubWithCompleteSpec extends AnyFlatSpec with Matchers with ScalaFutur
     Source(1 to 1000).runWith(sink)
     Source(1001 to 2000).runWith(sink)
 
-    result.futureValue.sorted should ===(1 to 2000)
+    result map {_.sorted} transformWith {_ should ===(Success(1 to 2000)) }
   }
 
   it should "work with long streams if one of the producers is slower" in assertAllStagesStopped {
@@ -122,21 +133,27 @@ class MergeHubWithCompleteSpec extends AnyFlatSpec with Matchers with ScalaFutur
     Source(1 to 1000).throttle(10, 1.millisecond, 100, ThrottleMode.shaping).runWith(sink)
     Source(1001 to 2000).runWith(sink)
 
-    result.futureValue.sorted should ===(1 to 2000)
+    result map {_.sorted} transformWith {_ should ===(Success(1 to 2000)) }
   }
 
-  it should "keep working even if one of the producers fail" in assertAllStagesStopped {
-    filterException[MergeHubWithComplete.ProducerFailed] {
+  it should "stop working when one of the producers fails" in assertAllStagesStopped {
 
-      val (sink, result) = MergeHubWithComplete.source[Int](16).take(10).toMat(Sink.seq)(Keep.both).run()
-      val maybe1 = Source.maybe[Int].toMat(sink)(Keep.left).run()
-      val maybe2 = Source.maybe[Int].concat(Source(2 to 10)).toMat(sink)(Keep.left).run()
+    class ThisTestException extends Exception("private exception for this test")
 
-      // allow sources to start
-      Thread.sleep(100)
-      maybe1.failure(TE("failing"))
-      maybe2.success(Some(1))
-      result.futureValue.sorted should ===(1 to 10)
+    val (sink, result) = MergeHubWithComplete.source[Int](16).toMat(Sink.seq)(Keep.both).run()
+    val maybe1 = Source.maybe[Int].toMat(sink)(Keep.left).run()
+    val maybe2 = Source.maybe[Int].concat(Source(2 to 10)).toMat(sink)(Keep.left).run()
+
+    recoverToSucceededIf[ThisTestException] {
+      Future {
+        blocking {
+          Thread.sleep(100)
+        }
+      } flatMap { _ =>
+        maybe1.failure(new ThisTestException)
+        maybe2.success(Some(1))
+        result
+      }
     }
   }
 }
